@@ -30,10 +30,10 @@ opt = parser.parse_args()
 print(opt)
 
 img_shape = (opt.channels, opt.img_size, opt.img_size)
-
+#是否可用GPU
 cuda = True if torch.cuda.is_available() else False
 
-
+#生成器
 class Generator(nn.Module):
     def __init__(self):
         super(Generator, self).__init__()
@@ -44,7 +44,7 @@ class Generator(nn.Module):
                 layers.append(nn.BatchNorm1d(out_feat, 0.8))
             layers.append(nn.LeakyReLU(0.2, inplace=True))
             return layers
-
+        #搭建生成器模型
         self.model = nn.Sequential(
             *block(opt.latent_dim, 128, normalize=False),
             *block(128, 256),
@@ -55,15 +55,16 @@ class Generator(nn.Module):
         )
 
     def forward(self, z):
+        #将噪声数据z送入生成器中
         img = self.model(z)
         img = img.view(img.size(0), *img_shape)
         return img
 
-
+#判别器
 class Discriminator(nn.Module):
     def __init__(self):
         super(Discriminator, self).__init__()
-
+        #搭建判别器模型
         self.model = nn.Sequential(
             nn.Linear(int(np.prod(img_shape)), 512),
             nn.LeakyReLU(0.2, inplace=True),
@@ -74,16 +75,17 @@ class Discriminator(nn.Module):
         )
 
     def forward(self, img):
+        #将数据送入判别器中
         img_flat = img.view(img.size(0), -1)
         validity = self.model(img_flat)
 
         return validity
 
 
-# Loss function
+#损失函数
 adversarial_loss = torch.nn.BCELoss()
 
-# Initialize generator and discriminator
+#初始化生成器和判别器
 generator = Generator()
 discriminator = Discriminator()
 
@@ -92,7 +94,7 @@ if cuda:
     discriminator.cuda()
     adversarial_loss.cuda()
 
-# Configure data loader
+# 数据加载
 os.makedirs("../../data/mnist", exist_ok=True)
 dataloader = torch.utils.data.DataLoader(
     datasets.MNIST(
@@ -107,64 +109,62 @@ dataloader = torch.utils.data.DataLoader(
     shuffle=True,
 )
 
-# Optimizers
+# 生成器优化器设置
 optimizer_G = torch.optim.Adam(generator.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
+# 判别器器优化器设置
 optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
 
 Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
 
-# ----------
-#  Training
-# ----------
+
+# 训练
 
 def train():
     for epoch in range(opt.n_epochs):
         for i, (imgs, _) in enumerate(dataloader):
-
-            # Adversarial ground truths
+        
             valid = Variable(Tensor(imgs.size(0), 1).fill_(1.0), requires_grad=False)
             fake = Variable(Tensor(imgs.size(0), 1).fill_(0.0), requires_grad=False)
-
-            # Configure input
+            
             real_imgs = Variable(imgs.type(Tensor))
-            # Sample noise as generator input
+            # 采样噪声样本
             z = Variable(Tensor(np.random.normal(0, 1, (imgs.shape[0], opt.latent_dim))))
 
-            # Generate a batch of images
+            # 生成数据样本
             gen_imgs = generator(z)
 
             # ---------------------
-            #  Train Discriminator
+            #  判别器训练
             # ---------------------
 
             optimizer_D.zero_grad()
 
-            # Measure discriminator's ability to classify real from generated samples
+            # 衡量判别器从生成的样本中分类真实样本的能力
             real_loss = adversarial_loss(discriminator(real_imgs), valid)
             fake_loss = adversarial_loss(discriminator(gen_imgs.detach()), fake)
             d_loss = (real_loss + fake_loss) / 2
-
+            #反向传播
             d_loss.backward()
             optimizer_D.step()
             
-            # Train the generator every n_critic iterations
+            # 训练n_critic次判别器后训练一次生成器
             if i % opt.n_critic == 0:
 
                 # -----------------
-                #  Train Generator
+                #  生成器训练
                 # -----------------
 
                 optimizer_G.zero_grad()
 
-                # Sample noise as generator input
+                # 采样噪声样本
                 z = Variable(Tensor(np.random.normal(0, 1, (imgs.shape[0], opt.latent_dim))))
 
-                # Generate a batch of images
+                # 生成数据样本
                 gen_imgs = generator(z)
 
-                # Loss measures generator's ability to fool the discriminator
+                # 损失函数
                 g_loss = adversarial_loss(discriminator(gen_imgs), valid)
-
+                #反向传播
                 g_loss.backward()
                 optimizer_G.step()
 
